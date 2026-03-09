@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <meta charset="UTF-8">
     <title>NOKIA_OS_v1.0</title>
     <style>
@@ -56,6 +57,7 @@
 
         /* DM Chat */
         .msg-bubble { border: 1px solid var(--dark); padding: 6px; margin-bottom: 8px; font-size: 0.75em; word-wrap: break-word; }
+        .msg-bubble span { display: block; margin-bottom: 5px; white-space: pre-wrap; }
         .msg-meta { margin-top: 5px; display: flex; gap: 5px; }
         .mp3-msg { background: #8a9e7c; border: 1px solid var(--dark); padding: 5px; cursor: pointer; font-size: 0.7em; margin: 5px 0; }
 
@@ -96,10 +98,20 @@
             <div class="search-box">
                 <input type="text" id="contactSearch" placeholder="SEARCH..." onkeyup="filterContacts()">
             </div>
+            
             <div id="chat-list">
-                <div class="chat-item" onclick="openChat('ISKEN')">>> ISKEN</div>
-                <div class="chat-item" onclick="openChat('MCB_SQUAD')">>> MCB_SQUAD</div>
-                <div class="chat-item" onclick="openChat('AIDAN')">>> AIDAN</div>
+                <div style="font-size: 0.7em; margin: 5px 0 5px 10px; opacity: 0.8;">
+                    [ RECENT_CHATS ]
+                </div>
+                <div style="border-bottom: 1px solid var(--dark); margin: 0 10px 10px 10px;"></div>
+
+                {% if users %}
+                    {% for user in users %}
+                        <div class="chat-item" onclick="openChat('{{ user }}')">>> {{ user }}</div>
+                    {% endfor %}
+                {% else %}
+                    <div class="chat-item" style="cursor: default; opacity: 0.5;">>> NO_USERS_ONLINE</div>
+                {% endif %}
             </div>
         </div>
 
@@ -109,15 +121,13 @@
                 <b id="chat-with" style="font-size: 0.7em;"></b>
             </div>
             <div id="chat-history">
-                <div class="msg-bubble">WELCOME TO CLUB</div>
+                <div class="msg-bubble"><span>WELCOME TO CLUB</span></div>
                 <div class="mp3-msg" onclick="playAudio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3')">
                     📻 VOICE_REC_01.MP3
                 </div>
             </div>
         </div>
-    </div>
-
-    <footer id="dm-tools">
+    </div> <footer id="dm-tools">
         <div class="input-row">
             <input type="text" id="msg-input" maxlength="16" placeholder="MAX 16 SYM" onkeydown="if(event.key==='Enter') sendMsg()">
             <button class="btn-black" onclick="sendMsg()">SEND</button>
@@ -146,27 +156,102 @@
 </div>
 
 <script>
+    // --- Инициализация сокетов ---
+    const socket = io();
+    let currentContact = null;
+
+    // При подключении входим в личную комнату
+    socket.on('connect', () => {
+        console.log("Connected to server");
+        socket.emit('join');
+    });
+
+    // Слушаем новые сообщения
+    socket.on('new_message', (data) => {
+        if (data.sender === currentContact || data.sender === "{{ current_user }}") {
+            renderMessage(data);
+        } else {
+            console.log("New message from: " + data.sender);
+        }
+    });
+
     let audio = new Audio();
     const seeker = document.getElementById('main-seeker');
 
     // --- VIEW SWITCHING ---
-    function openChat(user) {
+    async function openChat(user) {
+        currentContact = user;
         document.getElementById('inbox-screen').classList.add('hidden');
         document.getElementById('dm-screen').classList.remove('hidden');
         document.getElementById('dm-tools').style.display = 'block';
         document.getElementById('chat-with').innerText = "DM: " + user;
+            
+        // Очищаем старую переписку перед загрузкой
+        document.getElementById('chat-history').innerHTML = "";
+        await loadHistory(user);
     }
 
     function closeChat() {
+        currentContact = null;
         document.getElementById('inbox-screen').classList.remove('hidden');
         document.getElementById('dm-screen').classList.add('hidden');
         document.getElementById('dm-tools').style.display = 'none';
+        
         audio.pause();
         document.getElementById('top-mini-player').classList.remove('active');
         toggleFullPlayer(false);
     }
 
-    // --- SEARCH ---
+    // --- ЗАГРУЗКА ИСТОРИИ ---
+    async function loadHistory(contact) {
+        try {
+            const response = await fetch(`/api/history/${contact}`);
+            const messages = await response.json();
+            messages.forEach(msg => renderMessage(msg));
+            
+            const container = document.getElementById('chat-history');
+            container.scrollTop = container.scrollHeight;
+        } catch (err) {
+            console.error("Failed to load history", err);
+        }
+    }
+
+    // --- ОТРИСОВКА СООБЩЕНИЯ ---
+    function renderMessage(data) {
+        const container = document.getElementById('chat-history');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'msg-bubble';
+        
+        const isMe = data.sender === "{{ current_user }}";
+        const prefix = isMe ? "ME: " : `${data.sender}: `;
+        
+        msgDiv.innerHTML = `
+            <div style="font-size:0.6em; opacity:0.7;">${prefix} [${data.timestamp}]</div>
+            <span>${data.text}</span>
+            <div class="msg-meta">
+                <button class="btn-black" onclick="copyContent('${data.text}')">COPY</button>
+                <button class="btn-black" onclick="alert('FWD')">FWD</button>
+            </div>`;
+        
+        container.appendChild(msgDiv);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // --- ОТПРАВКА СООБЩЕНИЯ ---
+    function sendMsg() {
+        const input = document.getElementById('msg-input');
+        const text = input.value.trim();
+        
+        if (text && currentContact) {
+            socket.emit('send_message', {
+                receiver: currentContact,
+                text: text
+            });
+            input.value = "";
+        }
+    }
+
+    // --- ОСТАЛЬНАЯ ЛОГИКА ---
     function filterContacts() {
         let val = document.getElementById('contactSearch').value.toUpperCase();
         let items = document.getElementsByClassName('chat-item');
@@ -175,7 +260,6 @@
         }
     }
 
-    // --- AUDIO SYSTEM (WITH SCRUBBING) ---
     function playAudio(url) {
         audio.src = url;
         audio.play();
@@ -195,40 +279,22 @@
         document.getElementById('total-time').innerText = fmt(dur);
     };
 
-    // Scrubbing logic: Move audio to where the slider is moved
     seeker.oninput = () => { audio.currentTime = seeker.value; };
 
     function togglePlayback() {
-        if (audio.paused) { audio.play(); document.getElementById('master-play').innerText = "PAUSE"; }
-        else { audio.pause(); document.getElementById('master-play').innerText = "PLAY"; }
+        if (audio.paused) { 
+            audio.play(); 
+            document.getElementById('master-play').innerText = "PAUSE"; 
+        } else { 
+            audio.pause(); 
+            document.getElementById('master-play').innerText = "PLAY"; 
+        }
     }
 
     function seekAudio(sec) { audio.currentTime += sec; }
 
     function toggleFullPlayer(show) {
         document.getElementById('bottom-player').classList.toggle('open', show);
-    }
-
-    // --- CHAT LOGIC ---
-    function sendMsg() {
-        const input = document.getElementById('msg-input');
-        if (!input.value) return;
-        
-        const container = document.getElementById('chat-history');
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'msg-bubble';
-        
-        // Store just the text in a span so COPY is clean
-        const txt = input.value;
-        msgDiv.innerHTML = `<span>${txt}</span>
-            <div class="msg-meta">
-                <button class="btn-black" onclick="copyContent('${txt}')">COPY</button>
-                <button class="btn-black" onclick="alert('SELECT_CONTACT_TO_FWD')">FWD</button>
-            </div>`;
-        
-        container.appendChild(msgDiv);
-        input.value = "";
-        container.scrollTop = container.scrollHeight;
     }
 
     function copyContent(text) {
@@ -244,16 +310,14 @@
         }
     }
 
-    // Real-time Clock
     function updateClock() {
         let now = new Date();
         document.getElementById('clock').innerText = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
     }
+    
     setInterval(updateClock, 1000);
     updateClock();
 </script>
 
 </body>
 </html>
-
-
