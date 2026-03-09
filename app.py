@@ -1,240 +1,140 @@
-from flask import Flask, render_template, request, session, redirect, url_for, jsonify, send_from_directory
-from werkzeug.utils import secure_filename
-import os
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO, emit, join_room
+from datetime import datetime
+from sqlalchemy import or_, and_
 
 app = Flask(__name__)
-app.secret_key = "super_secret_key"
+app.secret_key = 'super_secret_key'
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Настройка SQLite
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-users_db = {}
-messages_db = {}
+db = SQLAlchemy(app)
+# Интеграция Socket.IO
+socketio = SocketIO(app, cors_allowed_origins="*")
 
-# ----------------
-# MAIN PAGES
-# ----------------
+# --- Модели базы данных ---
 
-@app.route("/")
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender = db.Column(db.String(50), nullable=False)
+    receiver = db.Column(db.String(50), nullable=False)
+    text = db.Column(db.String(16), nullable=False) # Ограничение 16 символов
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+with app.app_context():
+    db.create_all()
+
+# --- Роуты ---
+
+@app.route('/')
 def index():
-    return redirect(url_for("login"))
+    return render_template('index.html')
 
-
-@app.route("/signup", methods=["GET","POST"])
+@app.route('/signup', methods=['GET', 'POST'])
 def signup():
+    if request.method == 'POST':
+        user_id = request.form.get('username')
+        code = request.form.get('password')
+        if user_id and code:
+            if not User.query.filter_by(username=user_id).first():
+                new_user = User(username=user_id, password=code)
+                db.session.add(new_user)
+                db.session.commit()
+                return redirect(url_for('login'))
+            return "<h1 style='background-color: #9cb18d; color: #1a1a1a; font-family: Courier New; padding: 20px;'>[ ERROR: USER EXISTS ]</h1>"
+    return render_template('signup.html')
 
-    if request.method == "POST":
-
-        user = request.form.get("username")
-        pw = request.form.get("password")
-
-        if not user or not pw:
-            return "INVALID DATA"
-
-        if user in users_db:
-            return "USER EXISTS"
-
-        users_db[user] = pw
-        messages_db[user] = {}
-
-        return redirect(url_for("login"))
-
-    return render_template("signup.html")
-
-
-@app.route("/login", methods=["GET","POST"])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
+    if request.method == 'POST':
+        user_id = request.form.get('username')
+        code = request.form.get('password')
+        user = User.query.filter_by(username=user_id, password=code).first()
+        if user:
+            session['user'] = user.username
+            return redirect(url_for('dashboard'))
+        return "<h1 style='background-color: #9cb18d; color: #1a1a1a; font-family: Courier New; padding: 20px;'>[ FAILED. WRONG ID OR CODE. ]</h1>"
+    return render_template('login.html')
 
-    if request.method == "POST":
-
-        user = request.form.get("username")
-        pw = request.form.get("password")
-
-        if users_db.get(user) == pw:
-            session["user"] = user
-            return redirect(url_for("dashboard"))
-
-        return "WRONG LOGIN"
-
-    return render_template("login.html")
-
-
-@app.route("/dashboard")
+@app.route('/dashboard')
 def dashboard():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    
+    current_username = session['user']
+    
+    # Получаем список всех пользователей, кроме нас самих, для списка контактов
+    all_users = User.query.filter(User.username != current_username).all()
+    user_list = [u.username for u in all_users]
+    
+    return render_template('dashboard.html', current_user=current_username, users=user_list)
 
-    if "user" not in session:
-        return redirect(url_for("login"))
+# --- API для истории сообщений ---
 
-    user = session["user"]
-    recents = list(messages_db.get(user, {}).keys())
+@app.route('/api/history/<contact>')
+def get_history(contact):
+    if 'user' not in session:
+        return jsonify([]), 401
+    
+    current_user = session['user']
+    # Загружаем сообщения между текущим пользователем и выбранным контактом
+    messages = Message.query.filter(
+        or_(
+            and_(Message.sender == current_user, Message.receiver == contact),
+            and_(Message.sender == contact, Message.receiver == current_user)
+        )
+    ).order_by(Message.timestamp.asc()).all()
 
-    return render_template(
-        "dashboard.html",
-        current_user=user,
-        recents=recents
-    )
+    return jsonify([{
+        'sender': msg.sender,
+        'receiver': msg.receiver,
+        'text': msg.text,
+        'timestamp': msg.timestamp.strftime('%H:%M')
+    } for msg in messages])
 
+# --- WebSockets события ---
 
-# ----------------
-# USER SEARCH
-# ----------------
+@socketio.on('join')
+def on_join():
+    if 'user' in session:
+        user_room = session['user']
+        join_room(user_room)
+        print(f"[SOCKET] User {user_room} connected to their private room.")
 
-@app.route("/search_user")
-def search_user():
+@socketio.on('send_message')
+def handle_send_message(data):
+    sender = session.get('user')
+    receiver = data.get('receiver')
+    text = data.get('text', '')[:16] # Жесткая обрезка до 16 симв.
 
-    q = request.args.get("q","").lower()
+    if sender and receiver and text:
+        # 1. Сохраняем в базу данных
+        new_msg = Message(sender=sender, receiver=receiver, text=text)
+        db.session.add(new_msg)
+        db.session.commit()
 
-    result = [u for u in users_db if q in u.lower()]
+        # 2. Формируем данные для отправки
+        msg_payload = {
+            'sender': sender,
+            'receiver': receiver,
+            'text': text,
+            'timestamp': datetime.utcnow().strftime('%H:%M')
+        }
 
-    return jsonify(result)
+        # 3. Отправляем получателю (в его комнату) и себе (для мгновенного обновления)
+        emit('new_message', msg_payload, room=receiver)
+        emit('new_message', msg_payload, room=sender)
 
-
-# ----------------
-# LOAD CHAT
-# ----------------
-
-@app.route("/load_chat/<user>")
-def load_chat(user):
-
-    if "user" not in session:
-        return jsonify([])
-
-    me = session["user"]
-
-    if user not in users_db:
-        return jsonify([])
-
-    messages_db.setdefault(me,{})
-    messages_db.setdefault(user,{})
-
-    messages_db[me].setdefault(user,[])
-    messages_db[user].setdefault(me,[])
-
-    return jsonify(messages_db[me][user])
-
-
-# ----------------
-# SEND MESSAGE
-# ----------------
-
-@app.route("/send_message", methods=["POST"])
-def send_message():
-
-    if "user" not in session:
-        return "not logged"
-
-    sender = session["user"]
-    receiver = request.form.get("to")
-    text = request.form.get("text","")
-
-    if not text:
-        return "empty"
-
-    if receiver not in users_db:
-        return "user not found"
-
-    msg = {
-        "type":"text",
-        "content":text,
-        "sender":sender
-    }
-
-    messages_db[sender].setdefault(receiver,[]).append(msg)
-    messages_db[receiver].setdefault(sender,[]).append(msg)
-
-    return "ok"
-
-
-# ----------------
-# FILE UPLOAD
-# ----------------
-
-@app.route("/upload", methods=["POST"])
-def upload():
-
-    if "user" not in session:
-        return "not logged"
-
-    sender = session["user"]
-    receiver = request.form.get("to")
-
-    if receiver not in users_db:
-        return "user not found"
-
-    if "file" not in request.files:
-        return "no file"
-
-    file = request.files["file"]
-
-    if file.filename == "":
-        return "empty file"
-
-    filename = secure_filename(file.filename)
-
-    path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(path)
-
-    ext = filename.split(".")[-1].lower()
-
-    if ext in ["png","jpg","jpeg","gif"]:
-        ftype="image"
-    elif ext in ["mp4","webm"]:
-        ftype="video"
-    elif ext in ["mp3","wav","ogg"]:
-        ftype="audio"
-    else:
-        ftype="file"
-
-    msg = {
-        "type":ftype,
-        "content":filename,
-        "sender":sender
-    }
-
-    messages_db[sender].setdefault(receiver,[]).append(msg)
-    messages_db[receiver].setdefault(sender,[]).append(msg)
-
-    return "ok"
-
-
-# ----------------
-# LOCATION
-# ----------------
-
-@app.route("/send_location", methods=["POST"])
-def send_location():
-
-    if "user" not in session:
-        return "not logged"
-
-    sender = session["user"]
-    receiver = request.form.get("to")
-
-    lat = request.form.get("lat")
-    lon = request.form.get("lon")
-
-    msg = {
-        "type":"location",
-        "content":f"{lat},{lon}",
-        "sender":sender
-    }
-
-    messages_db[sender].setdefault(receiver,[]).append(msg)
-    messages_db[receiver].setdefault(sender,[]).append(msg)
-
-    return "ok"
-
-
-# ----------------
-# FILE SERVE
-# ----------------
-
-@app.route("/uploads/<filename>")
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-
-# ----------------
-
-if __name__ == "__main__":
-    app.run(debug=True, port=8080)
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    # host='0.0.0.0' обязателен для онлайна
+    socketio.run(app, host='0.0.0.0', port=port)

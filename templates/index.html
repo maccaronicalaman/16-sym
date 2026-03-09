@@ -1,28 +1,75 @@
+Index.html
 <!DOCTYPE html>
 <html>
 <head>
-    <title>16-SYM CLUB</title>
+    <title>16-SYMBOL CLUB</title>
     <style>
-        body { background:#9cb18d; color:#1a1a1a; font-family:monospace; text-transform:uppercase; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0; }
-        .box { border:4px solid #1a1a1a; padding:20px; text-align:center; width:280px; }
-        input { width:80%; background:transparent; border:2px solid #1a1a1a; padding:5px; margin:5px 0; font-family:inherit; }
-        button { background:#1a1a1a; color:#9cb18d; border:none; padding:10px; width:90%; cursor:pointer; font-weight:bold; margin-top:10px; }
+        /* Это и есть CSS, он живет прямо здесь */
+        body { 
+            background-color: #9cb18d; /* Тот самый зеленый цвет экрана Nokia */
+            color: #1a1a1a; /* Темно-серый, почти черный цвет «пикселей» */
+            font-family: 'Courier New', Courier, monospace; 
+            display: flex;
+            flex-direction: column;
+            align-items: center; 
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-transform: uppercase; /* Все буквы будут заглавными, как в старых меню */
+        }
+
+        h1 {
+            border: 2px solid #1a1a1a;
+            padding: 10px;
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+        }
+
+        p {
+            font-weight: bold;
+            margin-bottom: 30px;
+        }
+
+        .links {
+            display: flex;
+            gap: 20px;
+        }
+
+        a { 
+            color: #9cb18d; 
+            background-color: #1a1a1a; /* Инверсия: светлый текст на темном фоне */
+            padding: 10px 15px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        a:hover {
+            background-color: #333;
+        }
+
+        /* Эффект зернистости как на старом фото */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: url('https://www.transparenttextures.com/patterns/stardust.png');
+            opacity: 0.2;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
-    <div class="box">
-        <h1>16-SYMBOL CLUB</h1>
-        <form action="/login" method="POST">
-            <input name="username" placeholder="NAME" required>
-            <input name="password" type="password" placeholder="PASS" required>
-            <button type="submit">LOGIN</button>
-        </form>
-        <hr>
-        <form action="/signup" method="POST">
-            <input name="username" placeholder="NEW NAME" required>
-            <input name="password" type="password" placeholder="NEW PASS" required>
-            <button type="submit" style="background:#444">SIGN UP</button>
-        </form>
+    <h1>16-SYMBOL CLUB</h1>
+    <p>> CONNECTING PEOPLE...</p>
+    
+    <div class="links">
+        <a href="/login">LOGIN</a>
+        <a href="/signup">SIGN UP</a>
+    </div>
+
+    <div style="margin-top: 40px; font-size: 0.8em;">
+        [ SYSTEM READY ]
     </div>
 </body>
 </html>
+
