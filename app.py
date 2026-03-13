@@ -1,23 +1,25 @@
-import eventlet
-eventlet.monkey_patch()
+import gevent.monkey
+gevent.monkey.patch_all()
 
 import os
-from flask import Flask # и так далее ваши импорты...from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
-from datetime import datetime
 from sqlalchemy import or_, and_
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_key'
+app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_key')
 
 # Настройка SQLite
+# ВАЖНО: На Render данные в SQLite будут стираться после каждого деплоя
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-# Интеграция Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Интеграция Socket.IO с явным указанием gevent
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 # --- Модели базы данных ---
 
@@ -30,9 +32,10 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender = db.Column(db.String(50), nullable=False)
     receiver = db.Column(db.String(50), nullable=False)
-    text = db.Column(db.String(16), nullable=False) # Ограничение 16 символов
+    text = db.Column(db.String(16), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+# Создание таблиц
 with app.app_context():
     db.create_all()
 
@@ -74,14 +77,10 @@ def dashboard():
         return redirect(url_for('login'))
     
     current_username = session['user']
-    
-    # Получаем список всех пользователей, кроме нас самих, для списка контактов
     all_users = User.query.filter(User.username != current_username).all()
     user_list = [u.username for u in all_users]
     
     return render_template('dashboard.html', current_user=current_username, users=user_list)
-
-# --- API для истории сообщений ---
 
 @app.route('/api/history/<contact>')
 def get_history(contact):
@@ -89,7 +88,6 @@ def get_history(contact):
         return jsonify([]), 401
     
     current_user = session['user']
-    # Загружаем сообщения между текущим пользователем и выбранным контактом
     messages = Message.query.filter(
         or_(
             and_(Message.sender == current_user, Message.receiver == contact),
@@ -117,15 +115,13 @@ def on_join():
 def handle_send_message(data):
     sender = session.get('user')
     receiver = data.get('receiver')
-    text = data.get('text', '')[:16] # Жесткая обрезка до 16 симв.
+    text = data.get('text', '')[:16]
 
     if sender and receiver and text:
-        # 1. Сохраняем в базу данных
         new_msg = Message(sender=sender, receiver=receiver, text=text)
         db.session.add(new_msg)
         db.session.commit()
 
-        # 2. Формируем данные для отправки
         msg_payload = {
             'sender': sender,
             'receiver': receiver,
@@ -133,11 +129,10 @@ def handle_send_message(data):
             'timestamp': datetime.utcnow().strftime('%H:%M')
         }
 
-        # 3. Отправляем получателю (в его комнату) и себе (для мгновенного обновления)
         emit('new_message', msg_payload, room=receiver)
         emit('new_message', msg_payload, room=sender)
 
 if __name__ == '__main__':
-    import os
+    # Используем порт 8080 по умолчанию, если переменная окружения не задана
     port = int(os.environ.get('PORT', 8080))
-    socketio.run(app, host='0.0.0.0', port=port)
+    socketio.run(app, host='0.0.0.0', port=8080)
