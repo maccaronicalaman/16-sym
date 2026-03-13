@@ -135,6 +135,5 @@ def handle_send_message(data):
 
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get("PORT", 8080))
-    # host='0.0.0.0' обязателен для онлайна
+    port = int(os.environ.get('PORT', 8080))
     socketio.run(app, host='0.0.0.0', port=port)
