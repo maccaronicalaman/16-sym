@@ -1,4 +1,8 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+import eventlet
+eventlet.monkey_patch()
+
+import os
+from flask import Flask # и так далее ваши импорты...from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
 from datetime import datetime
