@@ -235,41 +235,15 @@
 </div>
 
 <script>
-   const socket = io();
+    const socket = io();
     let currentContact = null;
     let audio = new Audio();
     let replyData = null; 
-    let msgCounter = 0; // Для уникальных ID менюшек
+    let msgCounter = 0; 
     const seeker = document.getElementById('main-seeker');
-    function handleFileUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const base64Data = e.target.result;
-            
-            // Figure out if it's an image or an audio file
-            let fileType = 'unknown';
-            if (file.type.startsWith('image/')) fileType = 'image';
-            if (file.type.startsWith('audio/')) fileType = 'audio';
-
-            // Send via socket
-            socket.emit('send_message', {
-                receiver: currentContact,
-                text: `[SENT_A_FILE]`, 
-                file_data: base64Data,
-                file_type: fileType,
-                parent_text: replyData 
-            });
-            
-            event.target.value = ""; // Reset the input
-            cancelReply();
-        };
-        reader.readAsDataURL(file); // Convert file to string
-    }
-    // NEW: Array to track chats that have been opened
+    
     let recentChats = []; 
+    let lastRenderedMessage = ""; 
 
     socket.on('connect', () => {
         socket.emit('join');
@@ -281,10 +255,60 @@
         }
     });
 
-   let lastRenderedMessage = ""; // Anti-double-message tracker
+    // --- DRAG AND DROP & FILE UPLOAD LOGIC ---
+    const dmScreen = document.getElementById('dm-screen');
 
+    dmScreen.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dmScreen.style.boxShadow = "inset 0 0 20px var(--dark)"; // Visual feedback
+    });
+
+    dmScreen.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dmScreen.style.boxShadow = "none";
+    });
+
+    dmScreen.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dmScreen.style.boxShadow = "none";
+        if (e.dataTransfer.files.length > 0) {
+            processFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    function handleFileUpload(event) {
+        if (event.target.files.length > 0) {
+            processFile(event.target.files[0]);
+            event.target.value = ""; 
+        }
+    }
+
+    function processFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const base64Data = e.target.result;
+            
+            let fileType = 'unknown';
+            if (file.type.startsWith('image/')) fileType = 'image';
+            if (file.type.startsWith('audio/')) fileType = 'audio';
+
+            // HACK: We pack the file into the text string so the backend doesn't delete it
+            const packedText = `FILE_PAYLOAD|${fileType}|${base64Data}`;
+
+            socket.emit('send_message', {
+                receiver: currentContact,
+                text: packedText,
+                parent_text: replyData 
+            });
+            cancelReply();
+        };
+        reader.readAsDataURL(file); 
+    }
+
+    // --- RENDER MESSAGE (WITH FILE UNPACKING) ---
     function renderMessage(data) {
-        // ANTI-DOUBLE CHECK: If this exact message was just rendered, ignore it.
+        // Anti-double-render check
         const msgSignature = data.text + data.timestamp;
         if (lastRenderedMessage === msgSignature) return;
         lastRenderedMessage = msgSignature;
@@ -299,24 +323,29 @@
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg-bubble ' + (isMe ? 'msg-mine' : 'msg-other');
         
-        if (data.parent_text) {
-            msgDiv.classList.add('is-reply');
-        }
+        if (data.parent_text) msgDiv.classList.add('is-reply');
         
         const prefix = isMe ? "ME: " : `${data.sender}: `;
         let quoteHtml = data.parent_text ? `<div class="quote-box">↪ ${data.parent_text}</div>` : "";
-        
         const menuId = `msg-menu-${msgCounter}`;
-        const safeText = data.text ? data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
-
-        // NEW: Check if there's a file attached and change the HTML
+        
         let contentHtml = `<span>${data.text}</span>`;
-        if (data.file_data) {
-            if (data.file_type === 'image') {
-                contentHtml = `<img src="${data.file_data}" style="max-width: 100%; border: 2px solid var(--dark); margin-top: 5px;">`;
-            } else if (data.file_type === 'audio') {
-                // Creates your green MP3 block that plays when clicked!
-                contentHtml = `<div class="mp3-msg" onclick="playAudio('${data.file_data}')">▶ PLAY_AUDIO_FILE</div>`;
+        let safeText = data.text ? data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
+
+        // NEW: Unpack the file from the text if it exists
+        if (data.text && data.text.startsWith('FILE_PAYLOAD|')) {
+            const parts = data.text.split('|');
+            const fileType = parts[1];
+            const base64Data = parts[2];
+            
+            safeText = "[MEDIA_FILE]"; // Don't let users copy raw base64 data via the menu
+
+            if (fileType === 'image') {
+                contentHtml = `<img src="${base64Data}" style="max-width: 100%; border: 2px solid var(--dark); margin-top: 5px;">`;
+            } else if (fileType === 'audio') {
+                contentHtml = `<div class="mp3-msg" onclick="playAudio('${base64Data}')">▶ PLAY_AUDIO_FILE</div>`;
+            } else {
+                contentHtml = `<span style="opacity:0.5;">[UNSUPPORTED_FILE]</span>`;
             }
         }
         
@@ -342,13 +371,14 @@
         viewContainer.scrollTop = viewContainer.scrollHeight;
     }
 
+    // --- OTHER CORE FUNCTIONS ---
     function setReply(text) {
         replyData = text;
         const input = document.getElementById('msg-input');
         input.placeholder = "REPLYING TO: " + text.substring(0, 15) + "...";
         document.getElementById('cancel-reply-btn').style.display = "block";
         input.focus();
-        closeAllMenus(); // Прячем меню после клика
+        closeAllMenus(); 
     }
 
     function cancelReply() {
@@ -357,86 +387,25 @@
         document.getElementById('cancel-reply-btn').style.display = "none";
     }
 
-    // --- УПРАВЛЕНИЕ МЕНЮ (ТРИ ТОЧКИ) ---
     function toggleMsgMenu(menuId, event) {
-        event.stopPropagation(); // Не даем клику уйти в window.onclick
+        event.stopPropagation(); 
         const menu = document.getElementById(menuId);
         const isShowing = menu.classList.contains('show');
-        
-        closeAllMenus(); // Сначала закрываем все открытые
-        
-        if (!isShowing) {
-            menu.classList.add('show');
-        }
+        closeAllMenus(); 
+        if (!isShowing) menu.classList.add('show');
     }
 
     function closeAllMenus() {
         document.querySelectorAll('.msg-menu').forEach(m => m.classList.remove('show'));
     }
 
-    // Закрываем меню, если юзер кликнул куда-то еще
     window.onclick = function(event) {
-        if (!event.target.matches('.menu-trigger')) {
-            closeAllMenus();
-        }
+        if (!event.target.matches('.menu-trigger')) closeAllMenus();
     };
 
-    // --- ОБНОВЛЕННАЯ ФУНКЦИЯ ОТРИСОВКИ ---
-    function renderMessage(data) {
-        msgCounter++;
-        const container = document.getElementById('chat-history');
-        const isMe = data.sender === "{{ current_user }}";
-        
-        const wrapperDiv = document.createElement('div');
-        wrapperDiv.className = 'msg-wrapper ' + (isMe ? 'wrapper-mine' : 'wrapper-other');
-
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'msg-bubble ' + (isMe ? 'msg-mine' : 'msg-other');
-        
-        // ЕСЛИ СООБЩЕНИЕ - ЭТО ОТВЕТ, ВЕШАЕМ НОВЫЙ КЛАСС
-        if (data.parent_text) {
-            msgDiv.classList.add('is-reply');
-        }
-        
-        const prefix = isMe ? "ME: " : `${data.sender}: `;
-        let quoteHtml = data.parent_text ? `<div class="quote-box">↪ ${data.parent_text}</div>` : "";
-        
-        const menuId = `msg-menu-${msgCounter}`;
-        // Экранируем текст для безопасной передачи в функции
-        const safeText = data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        
-        msgDiv.innerHTML = `
-            <div class="msg-header">
-                <span>${prefix} [${data.timestamp}]</span>
-                <div style="position: relative;">
-                    <span class="menu-trigger" onclick="toggleMsgMenu('${menuId}', event)">[...]</span>
-                    <div id="${menuId}" class="msg-menu">
-                        <button onclick="setReply('${safeText}')">REPLY</button>
-                        <button onclick="copyContent('${safeText}')">COPY</button>
-                        <button onclick="alert('FWD')">FWD</button>
-                    </div>
-                </div>
-            </div>
-            ${quoteHtml}
-            <span>${data.text}</span>
-        `;
-        
-        wrapperDiv.appendChild(msgDiv);
-        container.appendChild(wrapperDiv);
-        
-        const viewContainer = document.getElementById('view-container');
-        viewContainer.scrollTop = viewContainer.scrollHeight;
-    }
-
     async function openChat(user) {
-    currentContact = user;
-    
-    // ВОТ ЭТОТ КУСОК: добавляем юзера в массив, если его там еще нет
-    if (!recentChats.includes(user)) {
-        recentChats.push(user);
-    }
-    
-    // ... весь твой остальной код функции openChat() остаётся без изменений
+        currentContact = user;
+        if (!recentChats.includes(user)) recentChats.push(user);
         
         document.getElementById('inbox-screen').classList.add('hidden');
         document.getElementById('dm-screen').classList.remove('hidden');
@@ -455,8 +424,6 @@
         audio.pause();
         document.getElementById('top-mini-player').classList.remove('active');
         toggleFullPlayer(false);
-        
-        // NEW: Clear search and re-filter to show only recent chats when returning to inbox
         document.getElementById('contactSearch').value = "";
         filterContacts();
     }
@@ -466,8 +433,6 @@
             const response = await fetch(`/api/history/${contact}`);
             const messages = await response.json();
             messages.forEach(msg => renderMessage(msg));
-            const viewContainer = document.getElementById('view-container');
-            viewContainer.scrollTop = viewContainer.scrollHeight;
         } catch (err) { console.error(err); }
     }
 
@@ -485,27 +450,22 @@
         }
     }
 
-    // UPDATED: Now respects recentChats vs active search
-   function filterContacts() {
-    let val = document.getElementById('contactSearch').value.toUpperCase().trim();
-    let items = document.getElementsByClassName('chat-item');
-    
-    for (let item of items) { 
-        // Пропускаем заглушку, если никого нет онлайн
-        if (item.innerText.includes("NO_USERS_ONLINE")) continue;
+    function filterContacts() {
+        let val = document.getElementById('contactSearch').value.toUpperCase().trim();
+        let items = document.getElementsByClassName('chat-item');
         
-        // Получаем имя пользователя из текста (убираем ">> ")
-        let userName = item.innerText.replace(">> ", "").trim();
-        
-        if (val === "") {
-            // Если строка поиска ПУСТАЯ: показываем только тех, кто в recentChats
-            item.style.display = recentChats.includes(userName) ? "" : "none";
-        } else {
-            // Если в поиске что-то ПИШУТ: показываем всех подходящих
-            item.style.display = userName.toUpperCase().includes(val) ? "" : "none";
+        for (let item of items) { 
+            if (item.innerText.includes("NO_USERS_ONLINE")) continue;
+            let userName = item.getAttribute('data-username') || item.innerText.replace(">> ", "").trim();
+            
+            if (val === "") {
+                item.style.display = recentChats.includes(userName) ? "" : "none";
+            } else {
+                item.style.display = userName.toUpperCase().includes(val) ? "" : "none";
+            }
         }
     }
-}
+
     function playAudio(url) {
         audio.src = url; audio.play();
         document.getElementById('top-mini-player').classList.add('active');
@@ -553,10 +513,7 @@
     setInterval(updateClock, 1000);
     updateClock();
     
-    // NEW: Initialize list on load so it hides everyone until you search
-    window.onload = function() {
-        filterContacts();
-    };
+    window.onload = function() { filterContacts(); };
 </script>
 </body>
 </html>
