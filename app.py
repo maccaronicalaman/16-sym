@@ -153,7 +153,7 @@ def handle_send_message(data):
         emit('new_message', msg_payload, room=sender)
 
 if __name__ == '__main__':
-    # Используем 5004 порт для стабильности на Mac
-    port = int(os.environ.get('PORT', 5004)) 
+    # Используем 5008 порт для стабильности на Mac
+    port = int(os.environ.get('PORT', 5008)) 
     print(f"Starting server on port {port}...")
     socketio.run(app, host='0.0.0.0', port=port)

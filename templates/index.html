@@ -1,21 +1,24 @@
-Index.html
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>16-SYMBOL CLUB</title>
     <style>
-        /* Это и есть CSS, он живет прямо здесь */
         body { 
-            background-color: #9cb18d; /* Тот самый зеленый цвет экрана Nokia */
-            color: #1a1a1a; /* Темно-серый, почти черный цвет «пикселей» */
+            background-color: #9cb18d; 
+            color: #1a1a1a; 
             font-family: 'Courier New', Courier, monospace; 
             display: flex;
             flex-direction: column;
             align-items: center; 
             justify-content: center;
-            height: 100vh;
+            /* 2. ЗАМЕНИЛ НА DVH, чтобы на телефоне все влезло */
+            height: 100dvh; 
+            width: 100%;
             margin: 0;
-            text-transform: uppercase; /* Все буквы будут заглавными, как в старых меню */
+            text-transform: uppercase;
+            overflow: hidden; /* Чтобы экран не "прыгал" */
         }
 
         h1 {
@@ -23,6 +26,7 @@ Index.html
             padding: 10px;
             font-size: 1.5rem;
             letter-spacing: 2px;
+            text-align: center; /* Чтобы на узких экранах текст был ровно */
         }
 
         p {
@@ -33,21 +37,25 @@ Index.html
         .links {
             display: flex;
             gap: 20px;
+            /* На очень маленьких телефонах кнопки встанут друг под друга */
+            flex-wrap: wrap; 
+            justify-content: center;
         }
 
         a { 
             color: #9cb18d; 
-            background-color: #1a1a1a; /* Инверсия: светлый текст на темном фоне */
-            padding: 10px 15px;
+            background-color: #1a1a1a; 
+            padding: 15px 25px; /* Увеличил отступы, чтобы было удобно тыкать пальцем */
             text-decoration: none;
             font-weight: bold;
+            min-width: 100px;
+            text-align: center;
         }
 
         a:hover {
             background-color: #333;
         }
 
-        /* Эффект зернистости как на старом фото */
         body::before {
             content: "";
             position: fixed;
@@ -59,8 +67,8 @@ Index.html
     </style>
 </head>
 <body>
-    <h1>16-SYMBOL CLUB</h1>
-    <p>> CONNECTING PEOPLE...</p>
+    <h1>SYMBOL CLUB</h1>
+    <p>> MURDERING PEOPLE...</p>
     
     <div class="links">
         <a href="/login">LOGIN</a>
@@ -72,4 +80,3 @@ Index.html
     </div>
 </body>
 </html>
-
