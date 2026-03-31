@@ -72,7 +72,6 @@
         }
         .chat-item { padding: 10px; border-bottom: 1px dashed var(--dark); cursor: pointer; font-size: 0.8em; }
 
-        /* --- СТИЛИ ДЛЯ РАЗДЕЛЕНИЯ СООБЩЕНИЙ (ME vs USER) --- */
         .msg-wrapper {
             display: flex;
             width: 100%;
@@ -80,7 +79,6 @@
             flex-direction: column;
         }
         
-        /* ВЫРАВНИВАНИЕ: МОИ - СПРАВА, ЧУЖИЕ - СЛЕВА */
         .wrapper-mine { align-items: flex-end; }
         .wrapper-other { align-items: flex-start; }
 
@@ -89,7 +87,6 @@
             max-width: 80%; min-width: 50%; position: relative;
         }
 
-        /* ЦВЕТА: МОИ СООБЩЕНИЯ (ТЕМНЫЕ) */
         .msg-mine {
             background-color: var(--dark);
             color: var(--bg);
@@ -97,7 +94,6 @@
             box-shadow: -4px 4px 0px rgba(0,0,0,0.1);
         }
         
-        /* ЦВЕТА: ЧУЖИЕ СООБЩЕНИЯ (СВЕТЛЫЕ) */
         .msg-other {
             background-color: transparent;
             color: var(--dark);
@@ -105,19 +101,16 @@
             box-shadow: 4px 4px 0px rgba(0,0,0,0.05);
         }
         
-        /* СТИЛЬ СООБЩЕНИЯ-ОТВЕТА */
         .is-reply { border: 2px dashed currentColor; }
 
         .msg-bubble span { display: block; margin-bottom: 5px; white-space: pre-wrap; word-break: break-all; }
         
-        /* ЦИТАТА ВНУТРИ СООБЩЕНИЯ */
         .quote-box {
             font-size: 0.8em; border-left: 2px solid currentColor;
             padding-left: 5px; opacity: 0.7; margin-bottom: 8px; font-style: italic;
             background-color: rgba(128, 128, 128, 0.1);
         }
 
-        /* --- СТИЛИ ДЛЯ ТРЕХ ТОЧЕК (МЕНЮ) --- */
         .msg-header {
             display: flex; justify-content: space-between; align-items: flex-start;
             font-size: 0.6em; opacity: 0.8; margin-bottom: 5px;
@@ -142,7 +135,66 @@
         .msg-menu button:last-child { border-bottom: none; }
         .msg-menu button:hover { background: #333; }
 
-        .mp3-msg { background: #8a9e7c; border: 1px solid var(--dark); padding: 5px; cursor: pointer; font-size: 0.7em; margin: 5px 0; }
+        /* --- TELEGRAM STYLE AUDIO PLAYER IN MESSAGE --- */
+        .tg-audio-player {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.15);
+            padding: 8px 12px;
+            margin-top: 8px;
+            border: 1px solid currentColor;
+            width: 200px; /* Фиксируем ширину, чтобы было аккуратно */
+        }
+        .tg-play-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: currentColor;
+            color: var(--bg); 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        /* Инвертируем цвета для чужих сообщений, чтобы кнопка всегда выделялась */
+        .msg-other .tg-play-btn { color: var(--bg); background: var(--dark); }
+        .msg-mine .tg-play-btn { color: var(--dark); background: var(--bg); }
+
+        .tg-audio-info {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .tg-title {
+            font-weight: bold;
+            font-size: 0.8em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tg-timeline-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .tg-scrubber {
+            flex-grow: 1;
+            height: 4px;
+            accent-color: currentColor;
+            cursor: pointer;
+            margin: 0;
+            padding: 0;
+        }
+        .tg-time {
+            font-size: 0.6em;
+            opacity: 0.8;
+            white-space: nowrap;
+        }
 
         #bottom-player {
             position: absolute; bottom: -200px; left: 0; right: 0;
@@ -219,7 +271,7 @@
     </footer>
 
     <div id="bottom-player">
-        <div style="font-size: 0.7em; margin-bottom: 10px;">SYSTEM_AUDIO_PRO</div>
+        <div style="font-size: 0.7em; margin-bottom: 10px;" id="player-title">SYSTEM_AUDIO_PRO</div>
         <input type="range" id="main-seeker" class="scrubber" value="0" step="0.1">
         <div style="display: flex; justify-content: space-between; font-size: 0.6em; margin-top: 5px;">
             <span id="cur-time">00:00</span>
@@ -244,6 +296,10 @@
     
     let recentChats = []; 
     let lastRenderedMessage = ""; 
+    
+    // Хранилище для аудио, чтобы не нагружать HTML код гигантскими текстами Base64
+    const audioStore = {}; 
+    let activeAudioId = null; // Какой трек сейчас играет
 
     socket.on('connect', () => {
         socket.emit('join');
@@ -293,8 +349,7 @@
             if (file.type.startsWith('image/')) fileType = 'image';
             if (file.type.startsWith('audio/')) fileType = 'audio';
 
-            // HACK: We pack the file into the text string so the backend doesn't delete it
-            const packedText = `FILE_PAYLOAD|${fileType}|${base64Data}`;
+            const packedText = `FILE_PAYLOAD|${fileType}|${file.name}|${base64Data}`;
 
             socket.emit('send_message', {
                 receiver: currentContact,
@@ -308,7 +363,6 @@
 
     // --- RENDER MESSAGE (WITH FILE UNPACKING) ---
     function renderMessage(data) {
-        // Anti-double-render check
         const msgSignature = data.text + data.timestamp;
         if (lastRenderedMessage === msgSignature) return;
         lastRenderedMessage = msgSignature;
@@ -332,18 +386,38 @@
         let contentHtml = `<span>${data.text}</span>`;
         let safeText = data.text ? data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
 
-        // NEW: Unpack the file from the text if it exists
+        // Unpack the file from the text if it exists
         if (data.text && data.text.startsWith('FILE_PAYLOAD|')) {
             const parts = data.text.split('|');
             const fileType = parts[1];
-            const base64Data = parts[2];
             
-            safeText = "[MEDIA_FILE]"; // Don't let users copy raw base64 data via the menu
+            let fileName = "UNKNOWN_TRACK.mp3";
+            let base64Data = parts[2];
+            if (parts.length > 3) {
+                fileName = parts[2];
+                base64Data = parts[3];
+            }
+            
+            safeText = "[MEDIA_FILE]"; 
 
             if (fileType === 'image') {
-                contentHtml = `<img src="${base64Data}" style="max-width: 100%; border: 2px solid var(--dark); margin-top: 5px;">`;
+                contentHtml = `<img src="${base64Data}" style="max-width: 100%; border: 2px solid currentColor; margin-top: 5px;">`;
             } else if (fileType === 'audio') {
-                contentHtml = `<div class="mp3-msg" onclick="playAudio('${base64Data}')">▶ PLAY_AUDIO_FILE</div>`;
+                const audioId = 'audio-' + msgCounter;
+                audioStore[audioId] = base64Data; // Сохраняем музыку в память
+                const safeName = fileName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
+                contentHtml = `
+                <div class="tg-audio-player" id="player-${audioId}">
+                    <div class="tg-play-btn" id="btn-${audioId}" onclick="toggleInlineAudio('${audioId}', '${safeName}')">▶</div>
+                    <div class="tg-audio-info">
+                        <div class="tg-title">${fileName}</div>
+                        <div class="tg-timeline-row">
+                            <input type="range" class="tg-scrubber" id="scrubber-${audioId}" value="0" step="0.1" oninput="seekInlineAudio('${audioId}', this.value)">
+                            <span class="tg-time" id="time-${audioId}">00:00</span>
+                        </div>
+                    </div>
+                </div>`;
             } else {
                 contentHtml = `<span style="opacity:0.5;">[UNSUPPORTED_FILE]</span>`;
             }
@@ -370,6 +444,89 @@
         const viewContainer = document.getElementById('view-container');
         viewContainer.scrollTop = viewContainer.scrollHeight;
     }
+
+    // --- AUDIO PLAYBACK LOGIC ---
+    function toggleInlineAudio(audioId, title) {
+        const btn = document.getElementById('btn-' + audioId);
+        
+        // Если пользователь нажал на тот же трек, который уже выбран
+        if (activeAudioId === audioId) {
+            if (audio.paused) {
+                audio.play();
+                btn.innerText = "⏸";
+                document.getElementById('master-play').innerText = "PAUSE";
+            } else {
+                audio.pause();
+                btn.innerText = "▶";
+                document.getElementById('master-play').innerText = "PLAY";
+            }
+            return;
+        }
+
+        // Если переключаемся на новый трек, сбрасываем старую кнопку
+        if (activeAudioId && document.getElementById('btn-' + activeAudioId)) {
+            document.getElementById('btn-' + activeAudioId).innerText = "▶";
+            document.getElementById('scrubber-' + activeAudioId).value = 0;
+            document.getElementById('time-' + activeAudioId).innerText = "00:00";
+        }
+
+        // Запускаем новый трек
+        activeAudioId = audioId;
+        audio.src = audioStore[audioId];
+        audio.play();
+        
+        btn.innerText = "⏸";
+        document.getElementById('top-mini-player').classList.add('active');
+        document.getElementById('master-play').innerText = "PAUSE";
+        document.getElementById('player-title').innerText = title;
+    }
+
+    function seekInlineAudio(audioId, val) {
+        if (activeAudioId === audioId) {
+            audio.currentTime = val;
+            if (audio.paused) audio.play();
+        }
+    }
+
+    audio.ontimeupdate = () => {
+        const cur = audio.currentTime; 
+        const dur = audio.duration || 0;
+        
+        // Обновляем главный нижний плеер
+        seeker.max = dur; 
+        seeker.value = cur;
+        let fmt = (s) => Math.floor(s/60).toString().padStart(2,'0') + ":" + Math.floor(s%60).toString().padStart(2,'0');
+        
+        document.getElementById('mini-time').innerText = fmt(cur);
+        document.getElementById('cur-time').innerText = fmt(cur);
+        document.getElementById('total-time').innerText = fmt(dur);
+
+        // Синхронизируем встроенный плеер в самом сообщении
+        if (activeAudioId && document.getElementById('scrubber-' + activeAudioId)) {
+            const inlineScrubber = document.getElementById('scrubber-' + activeAudioId);
+            const inlineTime = document.getElementById('time-' + activeAudioId);
+            inlineScrubber.max = dur;
+            inlineScrubber.value = cur;
+            inlineTime.innerText = fmt(cur);
+        }
+    };
+
+    seeker.oninput = () => { audio.currentTime = seeker.value; };
+
+    function togglePlayback() {
+        if (audio.paused) { 
+            audio.play(); 
+            document.getElementById('master-play').innerText = "PAUSE"; 
+            if (activeAudioId && document.getElementById('btn-' + activeAudioId)) document.getElementById('btn-' + activeAudioId).innerText = "⏸";
+        } else { 
+            audio.pause(); 
+            document.getElementById('master-play').innerText = "PLAY"; 
+            if (activeAudioId && document.getElementById('btn-' + activeAudioId)) document.getElementById('btn-' + activeAudioId).innerText = "▶";
+        }
+    }
+
+    function seekAudio(sec) { audio.currentTime += sec; }
+    function toggleFullPlayer(show) { document.getElementById('bottom-player').classList.toggle('open', show); }
 
     // --- OTHER CORE FUNCTIONS ---
     function setReply(text) {
@@ -422,6 +579,13 @@
         document.getElementById('dm-tools').style.display = 'none';
         cancelReply();
         audio.pause();
+        
+        // Сбрасываем иконки активного плеера при закрытии чата
+        if (activeAudioId && document.getElementById('btn-' + activeAudioId)) {
+             document.getElementById('btn-' + activeAudioId).innerText = "▶";
+        }
+        activeAudioId = null;
+        
         document.getElementById('top-mini-player').classList.remove('active');
         toggleFullPlayer(false);
         document.getElementById('contactSearch').value = "";
@@ -465,31 +629,6 @@
             }
         }
     }
-
-    function playAudio(url) {
-        audio.src = url; audio.play();
-        document.getElementById('top-mini-player').classList.add('active');
-        document.getElementById('master-play').innerText = "PAUSE";
-    }
-
-    audio.ontimeupdate = () => {
-        const cur = audio.currentTime; const dur = audio.duration || 0;
-        seeker.max = dur; seeker.value = cur;
-        let fmt = (s) => Math.floor(s/60).toString().padStart(2,'0') + ":" + Math.floor(s%60).toString().padStart(2,'0');
-        document.getElementById('mini-time').innerText = fmt(cur);
-        document.getElementById('cur-time').innerText = fmt(cur);
-        document.getElementById('total-time').innerText = fmt(dur);
-    };
-
-    seeker.oninput = () => { audio.currentTime = seeker.value; };
-
-    function togglePlayback() {
-        if (audio.paused) { audio.play(); document.getElementById('master-play').innerText = "PAUSE"; }
-        else { audio.pause(); document.getElementById('master-play').innerText = "PLAY"; }
-    }
-
-    function seekAudio(sec) { audio.currentTime += sec; }
-    function toggleFullPlayer(show) { document.getElementById('bottom-player').classList.toggle('open', show); }
     
     function copyContent(text) { 
         navigator.clipboard.writeText(text); 
