@@ -240,7 +240,33 @@
     let replyData = null; 
     let msgCounter = 0; // Для уникальных ID менюшек
     const seeker = document.getElementById('main-seeker');
-    
+    function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const base64Data = e.target.result;
+            
+            // Figure out if it's an image or an audio file
+            let fileType = 'unknown';
+            if (file.type.startsWith('image/')) fileType = 'image';
+            if (file.type.startsWith('audio/')) fileType = 'audio';
+
+            // Send via socket
+            socket.emit('send_message', {
+                receiver: currentContact,
+                text: `[SENT_A_FILE]`, 
+                file_data: base64Data,
+                file_type: fileType,
+                parent_text: replyData 
+            });
+            
+            event.target.value = ""; // Reset the input
+            cancelReply();
+        };
+        reader.readAsDataURL(file); // Convert file to string
+    }
     // NEW: Array to track chats that have been opened
     let recentChats = []; 
 
