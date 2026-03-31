@@ -209,7 +209,10 @@
         </div>
         <div class="share-row">
             <button class="btn-black" onclick="shareLoc()">LOC</button>
-            <button class="btn-black" onclick="alert('PHOTO_UPLOADER')">IMG</button>
+    
+            <input type="file" id="file-input" style="display: none;" onchange="uploadFile(this)">
+            <button class="btn-black" onclick="document.getElementById('file-input').click()">IMG</button>
+            
             <button class="btn-black" id="cancel-reply-btn" style="display:none; color: #ff4444;" onclick="cancelReply()">X REPLY</button>
         </div>
     </footer>
@@ -231,7 +234,7 @@
 </div>
 
 <script>
-    const socket = io();
+   const socket = io();
     let currentContact = null;
     let audio = new Audio();
     let replyData = null; 
@@ -243,6 +246,12 @@
 
     socket.on('connect', () => {
         socket.emit('join');
+    });
+
+    socket.on('new_message', (data) => {
+        if (data.sender === currentContact || data.sender === "{{ current_user }}") {
+            renderMessage(data);
+        }
     });
 
     socket.on('new_message', (data) => {
