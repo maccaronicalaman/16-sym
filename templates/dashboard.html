@@ -207,13 +207,14 @@
             <input type="text" id="msg-input" placeholder="TYPE MSG..." onkeydown="if(event.key==='Enter') sendMsg()">
             <button class="btn-black" onclick="sendMsg()">SEND</button>
         </div>
-        <div class="share-row">
-            <button class="btn-black" onclick="shareLoc()">LOC</button>
+       <div class="share-row">
+         <button class="btn-black" onclick="shareLoc()">LOC</button>
     
-            <input type="file" id="file-input" style="display: none;" onchange="uploadFile(this)">
-            <button class="btn-black" onclick="document.getElementById('file-input').click()">IMG</button>
-            
-            <button class="btn-black" id="cancel-reply-btn" style="display:none; color: #ff4444;" onclick="cancelReply()">X REPLY</button>
+         <input type="file" id="file-uploader" accept="image/*,audio/mp3,audio/mpeg,audio/wav" style="display: none;" onchange="handleFileUpload(event)">
+    
+         <button class="btn-black" onclick="document.getElementById('file-uploader').click()">MEDIA</button>
+    
+        <button class="btn-black" id="cancel-reply-btn" style="display:none; color: #ff4444;" onclick="cancelReply()">X REPLY</button>
         </div>
     </footer>
 
@@ -280,11 +281,66 @@
         }
     });
 
-    socket.on('new_message', (data) => {
-        if (data.sender === currentContact || data.sender === "{{ current_user }}") {
-            renderMessage(data);
+   let lastRenderedMessage = ""; // Anti-double-message tracker
+
+    function renderMessage(data) {
+        // ANTI-DOUBLE CHECK: If this exact message was just rendered, ignore it.
+        const msgSignature = data.text + data.timestamp;
+        if (lastRenderedMessage === msgSignature) return;
+        lastRenderedMessage = msgSignature;
+
+        msgCounter++;
+        const container = document.getElementById('chat-history');
+        const isMe = data.sender === "{{ current_user }}";
+        
+        const wrapperDiv = document.createElement('div');
+        wrapperDiv.className = 'msg-wrapper ' + (isMe ? 'wrapper-mine' : 'wrapper-other');
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'msg-bubble ' + (isMe ? 'msg-mine' : 'msg-other');
+        
+        if (data.parent_text) {
+            msgDiv.classList.add('is-reply');
         }
-    });
+        
+        const prefix = isMe ? "ME: " : `${data.sender}: `;
+        let quoteHtml = data.parent_text ? `<div class="quote-box">↪ ${data.parent_text}</div>` : "";
+        
+        const menuId = `msg-menu-${msgCounter}`;
+        const safeText = data.text ? data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
+
+        // NEW: Check if there's a file attached and change the HTML
+        let contentHtml = `<span>${data.text}</span>`;
+        if (data.file_data) {
+            if (data.file_type === 'image') {
+                contentHtml = `<img src="${data.file_data}" style="max-width: 100%; border: 2px solid var(--dark); margin-top: 5px;">`;
+            } else if (data.file_type === 'audio') {
+                // Creates your green MP3 block that plays when clicked!
+                contentHtml = `<div class="mp3-msg" onclick="playAudio('${data.file_data}')">▶ PLAY_AUDIO_FILE</div>`;
+            }
+        }
+        
+        msgDiv.innerHTML = `
+            <div class="msg-header">
+                <span>${prefix} [${data.timestamp || 'NOW'}]</span>
+                <div style="position: relative;">
+                    <span class="menu-trigger" onclick="toggleMsgMenu('${menuId}', event)">[...]</span>
+                    <div id="${menuId}" class="msg-menu">
+                        <button onclick="setReply('${safeText}')">REPLY</button>
+                        <button onclick="copyContent('${safeText}')">COPY</button>
+                    </div>
+                </div>
+            </div>
+            ${quoteHtml}
+            ${contentHtml} 
+        `;
+        
+        wrapperDiv.appendChild(msgDiv);
+        container.appendChild(wrapperDiv);
+        
+        const viewContainer = document.getElementById('view-container');
+        viewContainer.scrollTop = viewContainer.scrollHeight;
+    }
 
     function setReply(text) {
         replyData = text;
