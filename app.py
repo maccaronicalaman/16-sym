@@ -12,13 +12,12 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_key')
 
 # Настройка SQLite
-# ВАЖНО: На Render данные в SQLite будут стираться после каждого деплоя
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Интеграция Socket.IO с явным указанием gevent
+# Интеграция Socket.IO с gevent
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 # --- Модели базы данных ---
@@ -32,8 +31,11 @@ class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender = db.Column(db.String(50), nullable=False)
     receiver = db.Column(db.String(50), nullable=False)
-    text = db.Column(db.String(16), nullable=False)
+    text = db.Column(db.String, nullable=False) # Лимит убран
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    # Поля для реплаев
+    parent_id = db.Column(db.Integer, nullable=True)
+    parent_text = db.Column(db.String, nullable=True)
 
 # Создание таблиц
 with app.app_context():
@@ -96,10 +98,13 @@ def get_history(contact):
     ).order_by(Message.timestamp.asc()).all()
 
     return jsonify([{
+        'id': msg.id,
         'sender': msg.sender,
         'receiver': msg.receiver,
         'text': msg.text,
-        'timestamp': msg.timestamp.strftime('%H:%M')
+        'timestamp': msg.timestamp.strftime('%H:%M'),
+        'parent_id': msg.parent_id,
+        'parent_text': msg.parent_text
     } for msg in messages])
 
 # --- WebSockets события ---
@@ -113,26 +118,42 @@ def on_join():
 
 @socketio.on('send_message')
 def handle_send_message(data):
-    sender = session.get('user')
+    if 'user' not in session:
+        return
+    
+    sender = session['user']
     receiver = data.get('receiver')
-    text = data.get('text', '')[:16]
+    text = data.get('text', '') # Лимит убран
+    parent_id = data.get('parent_id')
+    parent_text = data.get('parent_text')
 
     if sender and receiver and text:
-        new_msg = Message(sender=sender, receiver=receiver, text=text)
+        new_msg = Message(
+            sender=sender, 
+            receiver=receiver, 
+            text=text,
+            parent_id=parent_id,
+            parent_text=parent_text
+        )
         db.session.add(new_msg)
         db.session.commit()
 
         msg_payload = {
+            'id': new_msg.id,
             'sender': sender,
             'receiver': receiver,
             'text': text,
-            'timestamp': datetime.utcnow().strftime('%H:%M')
+            'timestamp': datetime.utcnow().strftime('%H:%M'),
+            'parent_id': parent_id,
+            'parent_text': parent_text
         }
 
+        # Отправляем обоим участникам
         emit('new_message', msg_payload, room=receiver)
         emit('new_message', msg_payload, room=sender)
 
 if __name__ == '__main__':
-    # Используем порт 8080 по умолчанию, если переменная окружения не задана
-    port = int(os.environ.get('PORT', 8080))
-    socketio.run(app, host='0.0.0.0', port=8080)
+    # Используем 5004 порт для стабильности на Mac
+    port = int(os.environ.get('PORT', 5004)) 
+    print(f"Starting server on port {port}...")
+    socketio.run(app, host='0.0.0.0', port=port)
