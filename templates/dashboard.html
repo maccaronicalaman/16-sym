@@ -13,30 +13,54 @@
             background-color: var(--bg);
             color: var(--dark);
             font-family: 'Courier New', Courier, monospace;
-            padding: 10px; margin: 0;
+            margin: 0;
+            padding: 0;
             text-transform: uppercase;
-            display: flex; flex-direction: column; align-items: center;
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            height: 100vh; /* Занимаем всю высоту браузера */
+            overflow: hidden; /* Запрещаем скролл самой страницы */
         }
 
         .phone-screen {
-            width: min(90vw, 360px); 
-            height: min(95vh, 640px);
+            /* Динамические размеры для ПК: зависят от высоты монитора (vh) */
+            width: 45vh; 
+            height: 85vh;
+            max-width: 450px; /* Защита от слишком широкого растягивания */
+            max-height: 900px;
+            
             border: 4px solid var(--dark);
-            padding: 10px;
+            padding: 2vh; /* Динамические отступы */
             background-color: var(--bg);
             position: relative;
             overflow: hidden;
             display: flex;
             flex-direction: column;
             box-shadow: 10px 10px 0px #7a8a6e;
+            border-radius: 15px; /* Немного скруглим углы для стиля */
             margin: auto; 
+        }
+
+        /* 📱 МАГИЯ ДЛЯ МОБИЛОК: Если экран уже 500px, делаем Fullscreen */
+        @media (max-width: 500px) {
+            .phone-screen {
+                width: 100vw;
+                height: 100vh;
+                max-width: none;
+                max-height: none;
+                border: none; /* Убираем черную рамку */
+                border-radius: 0;
+                box-shadow: none;
+                padding: 10px; /* Возвращаем стандартные отступы */
+            }
         }
 
         #view-container {
             flex: 1;
             overflow-y: auto;
             margin: 5px 0;
-            font-size: clamp(0.7rem, 2vh, 1rem);
+            font-size: clamp(12px, 2vh, 16px); /* Шрифт не будет меньше 12px и больше 16px */
             position: relative; 
             scroll-behavior: smooth;
         }
@@ -144,7 +168,7 @@
             padding: 8px 12px;
             margin-top: 8px;
             border: 1px solid currentColor;
-            width: 200px; /* Фиксируем ширину, чтобы было аккуратно */
+            width: 200px; 
         }
         .tg-play-btn {
             width: 36px;
@@ -159,7 +183,6 @@
             font-size: 16px;
             flex-shrink: 0;
         }
-        /* Инвертируем цвета для чужих сообщений, чтобы кнопка всегда выделялась */
         .msg-other .tg-play-btn { color: var(--bg); background: var(--dark); }
         .msg-mine .tg-play-btn { color: var(--dark); background: var(--bg); }
 
@@ -233,8 +256,9 @@
             </div>
             
             <div id="chat-list">
-                <div style="font-size: 0.7em; margin: 5px 0 5px 10px; opacity: 0.8;">[ all_users ]</div>
+                <div id="list-label" style="font-size: 0.7em; margin: 5px 0 5px 10px; opacity: 0.8;">[ recent_chats ]</div>
                 <div style="border-bottom: 1px solid var(--dark); margin: 0 10px 10px 10px;"></div>
+                
                 {% if users %}
                     {% for user in users %}
                         <div class="chat-item" data-username="{{ user }}" onclick="openChat('{{ user }}')">>> {{ user }}</div>
@@ -294,12 +318,12 @@
     let msgCounter = 0; 
     const seeker = document.getElementById('main-seeker');
     
-    let recentChats = []; 
-    let lastRenderedMessage = ""; 
+    // 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: ДОСТАЕМ ИЗ LOCAL STORAGE 🔥
+    let recentChats = JSON.parse(localStorage.getItem('rq_recentChats')) || []; 
     
-    // Хранилище для аудио, чтобы не нагружать HTML код гигантскими текстами Base64
+    let lastRenderedMessage = ""; 
     const audioStore = {}; 
-    let activeAudioId = null; // Какой трек сейчас играет
+    let activeAudioId = null; 
 
     socket.on('connect', () => {
         socket.emit('join');
@@ -316,7 +340,7 @@
 
     dmScreen.addEventListener('dragover', (e) => {
         e.preventDefault();
-        dmScreen.style.boxShadow = "inset 0 0 20px var(--dark)"; // Visual feedback
+        dmScreen.style.boxShadow = "inset 0 0 20px var(--dark)"; 
     });
 
     dmScreen.addEventListener('dragleave', (e) => {
@@ -361,7 +385,7 @@
         reader.readAsDataURL(file); 
     }
 
-    // --- RENDER MESSAGE (WITH FILE UNPACKING) ---
+    // --- RENDER MESSAGE ---
     function renderMessage(data) {
         const msgSignature = data.text + data.timestamp;
         if (lastRenderedMessage === msgSignature) return;
@@ -386,7 +410,6 @@
         let contentHtml = `<span>${data.text}</span>`;
         let safeText = data.text ? data.text.replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
 
-        // Unpack the file from the text if it exists
         if (data.text && data.text.startsWith('FILE_PAYLOAD|')) {
             const parts = data.text.split('|');
             const fileType = parts[1];
@@ -404,7 +427,7 @@
                 contentHtml = `<img src="${base64Data}" style="max-width: 100%; border: 2px solid currentColor; margin-top: 5px;">`;
             } else if (fileType === 'audio') {
                 const audioId = 'audio-' + msgCounter;
-                audioStore[audioId] = base64Data; // Сохраняем музыку в память
+                audioStore[audioId] = base64Data; 
                 const safeName = fileName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 
                 contentHtml = `
@@ -449,7 +472,6 @@
     function toggleInlineAudio(audioId, title) {
         const btn = document.getElementById('btn-' + audioId);
         
-        // Если пользователь нажал на тот же трек, который уже выбран
         if (activeAudioId === audioId) {
             if (audio.paused) {
                 audio.play();
@@ -463,14 +485,12 @@
             return;
         }
 
-        // Если переключаемся на новый трек, сбрасываем старую кнопку
         if (activeAudioId && document.getElementById('btn-' + activeAudioId)) {
             document.getElementById('btn-' + activeAudioId).innerText = "▶";
             document.getElementById('scrubber-' + activeAudioId).value = 0;
             document.getElementById('time-' + activeAudioId).innerText = "00:00";
         }
 
-        // Запускаем новый трек
         activeAudioId = audioId;
         audio.src = audioStore[audioId];
         audio.play();
@@ -492,7 +512,6 @@
         const cur = audio.currentTime; 
         const dur = audio.duration || 0;
         
-        // Обновляем главный нижний плеер
         seeker.max = dur; 
         seeker.value = cur;
         let fmt = (s) => Math.floor(s/60).toString().padStart(2,'0') + ":" + Math.floor(s%60).toString().padStart(2,'0');
@@ -501,7 +520,6 @@
         document.getElementById('cur-time').innerText = fmt(cur);
         document.getElementById('total-time').innerText = fmt(dur);
 
-        // Синхронизируем встроенный плеер в самом сообщении
         if (activeAudioId && document.getElementById('scrubber-' + activeAudioId)) {
             const inlineScrubber = document.getElementById('scrubber-' + activeAudioId);
             const inlineTime = document.getElementById('time-' + activeAudioId);
@@ -562,7 +580,12 @@
 
     async function openChat(user) {
         currentContact = user;
-        if (!recentChats.includes(user)) recentChats.push(user);
+        
+        // 🔥 ВТОРОЕ ИСПРАВЛЕНИЕ: СОХРАНЯЕМ В ПАМЯТЬ БРАУЗЕРА 🔥
+        if (!recentChats.includes(user)) {
+            recentChats.push(user);
+            localStorage.setItem('rq_recentChats', JSON.stringify(recentChats));
+        }
         
         document.getElementById('inbox-screen').classList.add('hidden');
         document.getElementById('dm-screen').classList.remove('hidden');
@@ -580,7 +603,6 @@
         cancelReply();
         audio.pause();
         
-        // Сбрасываем иконки активного плеера при закрытии чата
         if (activeAudioId && document.getElementById('btn-' + activeAudioId)) {
              document.getElementById('btn-' + activeAudioId).innerText = "▶";
         }
@@ -600,6 +622,31 @@
         } catch (err) { console.error(err); }
     }
 
+    // 🔥 ТРЕТЬЕ ИСПРАВЛЕНИЕ: ПРЯЧЕМ ВСЕХ, КТО НЕ В RECENT CHATS 🔥
+    function filterContacts() {
+        let val = document.getElementById('contactSearch').value.toUpperCase().trim();
+        let items = document.getElementsByClassName('chat-item');
+        let label = document.getElementById('list-label');
+        
+        if (val === "") {
+            // Если поиск пуст, показываем только недавние
+            label.innerText = "[ recent_chats ]";
+            for (let item of items) { 
+                if (item.innerText.includes("NO_USERS_ONLINE")) continue;
+                let userName = item.getAttribute('data-username') || item.innerText.replace(">> ", "").trim();
+                item.style.display = recentChats.includes(userName) ? "" : "none";
+            }
+        } else {
+            // Если ввели текст, ищем по всей базе пользователей
+            label.innerText = "[ search_results ]";
+            for (let item of items) {
+                if (item.innerText.includes("NO_USERS_ONLINE")) continue;
+                let userName = item.getAttribute('data-username') || item.innerText.replace(">> ", "").trim();
+                item.style.display = userName.toUpperCase().includes(val) ? "" : "none";
+            }
+        }
+    }
+    
     function sendMsg() {
         const input = document.getElementById('msg-input');
         const text = input.value.trim();
@@ -614,22 +661,6 @@
         }
     }
 
-    function filterContacts() {
-        let val = document.getElementById('contactSearch').value.toUpperCase().trim();
-        let items = document.getElementsByClassName('chat-item');
-        
-        for (let item of items) { 
-            if (item.innerText.includes("NO_USERS_ONLINE")) continue;
-            let userName = item.getAttribute('data-username') || item.innerText.replace(">> ", "").trim();
-            
-            if (val === "") {
-                item.style.display = recentChats.includes(userName) ? "" : "none";
-            } else {
-                item.style.display = userName.toUpperCase().includes(val) ? "" : "none";
-            }
-        }
-    }
-    
     function copyContent(text) { 
         navigator.clipboard.writeText(text); 
         alert("TEXT COPIED"); 
